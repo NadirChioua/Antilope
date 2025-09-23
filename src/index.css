@@ -1,0 +1,162 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-gray-200;
+  }
+  
+  body {
+    @apply bg-cream-50 text-gray-800 font-sans;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+  
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+@layer components {
+  /* Light theme cards */
+  .card {
+    @apply bg-white rounded-xl border border-gray-200 p-6 shadow-soft;
+  }
+  
+  .card-elegant {
+    @apply bg-white rounded-2xl border border-gray-100 p-8 shadow-elegant;
+  }
+  
+  /* Buttons */
+  .btn-primary {
+    @apply bg-primary-500 hover:bg-primary-600 text-white font-medium px-6 py-3 rounded-xl transition-all duration-200 shadow-soft hover:shadow-elegant;
+  }
+  
+  .btn-secondary {
+    @apply bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium px-6 py-3 rounded-xl border border-gray-200 transition-all duration-200;
+  }
+  
+  .btn-outline {
+    @apply border-2 border-primary-500 text-primary-500 hover:bg-primary-500 hover:text-white font-medium px-6 py-3 rounded-xl transition-all duration-200;
+  }
+  
+  .btn-ghost {
+    @apply text-gray-600 hover:text-primary-500 hover:bg-primary-50 font-medium px-4 py-2 rounded-lg transition-all duration-200;
+  }
+  
+  /* Form elements */
+  .input-field {
+    @apply bg-white border border-gray-200 rounded-xl px-4 py-3 text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200;
+  }
+  
+  .input-field:focus {
+    @apply shadow-soft;
+  }
+  
+  /* Navigation */
+  .sidebar-item {
+    @apply flex items-center gap-3 px-4 py-3 text-gray-600 hover:text-primary-500 hover:bg-primary-50 rounded-xl transition-all duration-200 cursor-pointer;
+  }
+  
+  .sidebar-item.active {
+    @apply bg-primary-500 text-white shadow-soft;
+  }
+  
+  .mobile-nav-item {
+    @apply flex flex-col items-center gap-1 p-3 text-gray-500 hover:text-primary-500 transition-colors duration-200;
+  }
+  
+  .mobile-nav-item.active {
+    @apply text-primary-500;
+  }
+  
+  /* Status indicators */
+  .status-success {
+    @apply bg-green-50 text-green-700 border border-green-200;
+  }
+  
+  .status-warning {
+    @apply bg-yellow-50 text-yellow-700 border border-yellow-200;
+  }
+  
+  .status-error {
+    @apply bg-red-50 text-red-700 border border-red-200;
+  }
+  
+  .status-info {
+    @apply bg-blue-50 text-blue-700 border border-blue-200;
+  }
+  
+  /* Glass effect */
+  .glass {
+    @apply bg-white/80 backdrop-blur-sm border border-white/20;
+  }
+  
+  /* Gradient backgrounds */
+  .gradient-primary {
+    @apply bg-gradient-to-br from-primary-400 to-primary-600;
+  }
+  
+  .gradient-cream {
+    @apply bg-gradient-to-br from-cream-50 to-cream-100;
+  }
+  
+  /* Text styles */
+  .text-elegant {
+    @apply font-serif text-gray-800;
+  }
+  
+  .text-muted {
+    @apply text-gray-500;
+  }
+  
+  /* Animations */
+  .animate-float {
+    animation: float 3s ease-in-out infinite;
+  }
+  
+  /* Sidebar width utilities */
+  .w-70 {
+    width: 17.5rem; /* 280px */
+  }
+  
+  .w-72 {
+    width: 18rem; /* 288px */
+  }
+}
+
+/* Custom scrollbar for light theme */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-gray-100;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-400;
+}
+
+/* RTL support */
+[dir="rtl"] .sidebar-item {
+  @apply flex-row-reverse;
+}
+
+[dir="rtl"] .mobile-nav-item {
+  @apply flex-col-reverse;
+}
+
+/* Selection colors */
+::selection {
+  @apply bg-primary-200 text-primary-800;
+}
+
+/* Focus styles */
+.focus-ring {
+  @apply focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2;
+}

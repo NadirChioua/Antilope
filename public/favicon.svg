@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <!-- Background Circle -->
+  <circle cx="16" cy="16" r="16" fill="#D4AF37"/>
+  
+  <!-- Woman's Head -->
+  <circle cx="16" cy="16" r="12" fill="#D4AF37" stroke="#000" stroke-width="1"/>
+  
+  <!-- Eyes -->
+  <circle cx="13" cy="14" r="1" fill="#000"/>
+  <circle cx="19" cy="14" r="1" fill="#000"/>
+  
+  <!-- Eyelashes -->
+  <line x1="12" y1="13" x2="11" y2="12" stroke="#000" stroke-width="0.5"/>
+  <line x1="14" y1="13" x2="13" y2="12" stroke="#000" stroke-width="0.5"/>
+  <line x1="18" y1="13" x2="19" y2="12" stroke="#000" stroke-width="0.5"/>
+  <line x1="20" y1="13" x2="21" y2="12" stroke="#000" stroke-width="0.5"/>
+  
+  <!-- Nose -->
+  <line x1="16" y1="16" x2="16" y2="18" stroke="#000" stroke-width="0.5"/>
+  
+  <!-- Lips -->
+  <ellipse cx="16" cy="20" rx="2" ry="0.5" fill="#000"/>
+  
+  <!-- Hair - Flowing Waves -->
+  <path d="M 8 8 Q 12 6 16 8 Q 20 6 24 8" stroke="#D4AF37" stroke-width="1" fill="none"/>
+  <path d="M 7 10 Q 11 8 15 10 Q 19 8 23 10" stroke="#D4AF37" stroke-width="0.8" fill="none"/>
+  <path d="M 6 12 Q 10 10 14 12 Q 18 10 22 12" stroke="#D4AF37" stroke-width="0.6" fill="none"/>
+  
+  <!-- Side Hair -->
+  <circle cx="8" cy="14" r="1" fill="#D4AF37"/>
+  <circle cx="8" cy="16" r="0.8" fill="#D4AF37"/>
+  <circle cx="8" cy="18" r="0.6" fill="#D4AF37"/>
+  
+  <circle cx="24" cy="14" r="1" fill="#D4AF37"/>
+  <circle cx="24" cy="16" r="0.8" fill="#D4AF37"/>
+  <circle cx="24" cy="18" r="0.6" fill="#D4AF37"/>
+  
+  <!-- Flowing Hair Strands -->
+  <line x1="12" y1="24" x2="11" y2="26" stroke="#D4AF37" stroke-width="0.5"/>
+  <line x1="16" y1="24" x2="15" y2="27" stroke="#D4AF37" stroke-width="0.5"/>
+  <line x1="20" y1="24" x2="21" y2="26" stroke="#D4AF37" stroke-width="0.5"/>
+  <line x1="24" y1="24" x2="25" y2="27" stroke="#D4AF37" stroke-width="0.5"/>
+</svg>
+
