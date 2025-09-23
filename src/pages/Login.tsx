@@ -45,15 +45,7 @@ const Login: React.FC = () => {
     }
   };
 
-  const demoCredentials = [
-    { email: 'admin@antilope.com', password: 'admin123', role: 'admin' },
-    { email: 'staff@antilope.com', password: 'staff123', role: 'staff' },
-  ];
 
-  const fillDemoCredentials = (email: string, password: string) => {
-    setEmail(email);
-    setPassword(password);
-  };
 
   return (
     <div className="min-h-screen gradient-cream flex items-center justify-center p-4">
@@ -142,25 +134,6 @@ const Login: React.FC = () => {
               {buttonLoading ? t('common.loading') : t('auth.login')}
             </button>
           </form>
-
-
-
-          {/* Demo Credentials */}
-          <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
-            <h3 className="text-sm font-medium text-blue-800 mb-3">{t('auth.demoCredentials')}</h3>
-            <div className="space-y-3">
-              {demoCredentials.map((cred, index) => (
-                <button
-                  key={index}
-                  onClick={() => fillDemoCredentials(cred.email, cred.password)}
-                  className="w-full p-3 bg-gray-50 hover:bg-gray-100 rounded-lg text-left transition-colors duration-200"
-                >
-                  <div className="text-sm font-medium text-gray-800">{cred.email}</div>
-                  <div className="text-xs text-gray-500">{cred.role}</div>
-                </button>
-              ))}
-            </div>
-          </div>
         </motion.div>
 
         {/* Footer */}
