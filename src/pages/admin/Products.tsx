@@ -11,10 +11,14 @@ import {
   Eye,
   MoreVertical,
   Grid,
-  List
+  List,
+  PackagePlus,
+  History
 } from 'lucide-react';
 import ProductUsageDashboard from '@/components/ProductUsageDashboard';
 import ProductModal from '@/components/ProductModal';
+import RestockModal from '@/components/RestockModal';
+import RestockHistory from '@/components/RestockHistory';
 import { Product } from '@/types';
 import { productService } from '@/services/database';
 import { formatPrice } from '@/utils/currency';
@@ -29,6 +33,10 @@ const Products = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
+  const [isRestockModalOpen, setIsRestockModalOpen] = useState(false);
+  const [restockProduct, setRestockProduct] = useState<Product | null>(null);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [historyProduct, setHistoryProduct] = useState<Product | null>(null);
 
   const categories = [
     'Hair Care',
@@ -67,6 +75,16 @@ const Products = () => {
     setIsModalOpen(true);
   };
 
+  const handleRestockProduct = (product: Product) => {
+    setRestockProduct(product);
+    setIsRestockModalOpen(true);
+  };
+
+  const handleViewHistory = (product: Product) => {
+    setHistoryProduct(product);
+    setIsHistoryModalOpen(true);
+  };
+
   const handleDeleteProduct = async (productId: string) => {
     try {
       await productService.delete(productId);
@@ -89,6 +107,36 @@ const Products = () => {
     }
   };
 
+  const handleRestock = async (restockData: any) => {
+    try {
+      console.log('🔄 Starting restock operation in UI:', restockData);
+      const success = await productService.restock(restockData);
+      if (success) {
+        console.log('✅ Restock successful, refreshing products...');
+        // Refresh products to show updated stock levels
+        await loadProducts();
+        setIsRestockModalOpen(false);
+        setRestockProduct(null);
+        return true;
+      } else {
+        console.error('❌ Restock operation returned false');
+        toast.error('Failed to restock product - operation returned false');
+        return false;
+      }
+    } catch (error) {
+      console.error('❌ Error restocking product:', error);
+      toast.error(`Failed to restock product: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return false;
+    }
+  };
+
+  const handleRestockSuccess = () => {
+    // Refresh products to show updated stock levels
+    loadProducts();
+    setIsRestockModalOpen(false);
+    setRestockProduct(null);
+  };
+
   const filteredProducts = products.filter(product => {
     const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          product.brand.toLowerCase().includes(searchTerm.toLowerCase());
@@ -97,8 +145,8 @@ const Products = () => {
   });
 
   const getStockStatus = (product: Product) => {
-    const totalStock = (product.sealedBottles || 0) + (product.openBottleRemainingMl || 0) / (product.bottleSizeMl || 1000);
-    const threshold = product.minStockThreshold || 2;
+    const totalStock = (product.sealed_bottles || 0) + (product.open_bottle_remaining_ml || 0) / (product.bottle_capacity_ml || 1000);
+    const threshold = product.minQuantity || 2;
     
     if (totalStock === 0) return { status: 'out', color: 'text-red-600 bg-red-100', label: 'Out of Stock' };
     if (totalStock <= threshold) return { status: 'low', color: 'text-yellow-600 bg-yellow-100', label: 'Low Stock' };
@@ -160,21 +208,35 @@ const Products = () => {
               {stockStatus.label}
             </span>
             <span className="text-xs text-gray-500">
-              {product.sealedBottles || 0} bottles
+              {product.sealed_bottles || 0} bottles
             </span>
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex gap-1">
             <button
               onClick={() => handleEditProduct(product)}
-              className="flex-1 px-3 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors text-xs font-medium flex items-center justify-center gap-1"
+              className="flex-1 px-2 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors text-xs font-medium flex items-center justify-center gap-1"
             >
               <Edit className="w-3 h-3" />
               Edit
             </button>
             <button
+              onClick={() => handleRestockProduct(product)}
+              className="px-2 py-2 bg-green-50 text-green-600 rounded-lg hover:bg-green-100 transition-colors text-xs font-medium flex items-center justify-center"
+              title="Restock"
+            >
+              <PackagePlus className="w-3 h-3" />
+            </button>
+            <button
+              onClick={() => handleViewHistory(product)}
+              className="px-2 py-2 bg-purple-50 text-purple-600 rounded-lg hover:bg-purple-100 transition-colors text-xs font-medium flex items-center justify-center"
+              title="View History"
+            >
+              <History className="w-3 h-3" />
+            </button>
+            <button
               onClick={() => setShowDeleteConfirm(product.id)}
-              className="px-3 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors text-xs font-medium flex items-center justify-center"
+              className="px-2 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors text-xs font-medium flex items-center justify-center"
             >
               <Trash2 className="w-3 h-3" />
             </button>
@@ -227,19 +289,35 @@ const Products = () => {
           </span>
         </td>
         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-          {product.sealedBottles || 0}
+          {product.sealed_bottles || 0}
         </td>
         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
           <div className="flex items-center gap-2">
             <button
               onClick={() => handleEditProduct(product)}
               className="text-blue-600 hover:text-blue-900"
+              title="Edit"
             >
               <Edit className="w-4 h-4" />
             </button>
             <button
+              onClick={() => handleRestockProduct(product)}
+              className="text-green-600 hover:text-green-900"
+              title="Restock"
+            >
+              <PackagePlus className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => handleViewHistory(product)}
+              className="text-purple-600 hover:text-purple-900"
+              title="View History"
+            >
+              <History className="w-4 h-4" />
+            </button>
+            <button
               onClick={() => setShowDeleteConfirm(product.id)}
               className="text-red-600 hover:text-red-900"
+              title="Delete"
             >
               <Trash2 className="w-4 h-4" />
             </button>
@@ -380,6 +458,22 @@ const Products = () => {
         onClose={() => setIsModalOpen(false)}
         product={selectedProduct}
         onSave={handleSaveProduct}
+      />
+
+      {/* Restock Modal */}
+      <RestockModal
+        isOpen={isRestockModalOpen}
+        onClose={() => setIsRestockModalOpen(false)}
+        product={restockProduct}
+        onRestock={handleRestock}
+      />
+
+      {/* Restock History Modal */}
+      <RestockHistory
+        isOpen={isHistoryModalOpen}
+        onClose={() => setIsHistoryModalOpen(false)}
+        productId={historyProduct?.id}
+        productName={historyProduct?.name}
       />
 
       {/* Delete Confirmation Modal */}

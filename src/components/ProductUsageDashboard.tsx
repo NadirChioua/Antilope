@@ -23,7 +23,7 @@ import {
   ShoppingCart
 } from 'lucide-react';
 import { SimpleBottleConsumptionService, ProductInventoryStatus } from '@/services/SimpleBottleConsumptionService';
-import { serviceService, saleService } from '@/services/database';
+import { serviceService, saleService, productService } from '@/services/database';
 import { useAuth } from '@/contexts/AuthContext';
 import toast from 'react-hot-toast';
 
@@ -200,10 +200,25 @@ const ProductUsageDashboard: React.FC<ProductUsageDashboardProps> = ({ className
   const handleRestock = async (productId: string, amount: number) => {
     setIsRestocking(true);
     try {
-      // Note: SimpleBottleConsumptionService doesn't have restockProduct method
-      // This would need to be implemented or use a different approach
-      toast.error('Restock functionality needs to be implemented');
-      return;
+      const restockData = {
+        productId,
+        bottlesToAdd: amount,
+        costPerBottle: 0, // Default cost, can be updated later
+        totalCost: 0,
+        supplier: '',
+        invoiceNumber: '',
+        notes: 'Quick restock from dashboard',
+        restockDate: new Date().toISOString().split('T')[0]
+      };
+
+      const success = await productService.restock(restockData);
+      if (success) {
+        toast.success(`Successfully restocked ${amount} bottles`);
+        // Refresh the data
+        loadDashboardData();
+      } else {
+        toast.error('Failed to restock product');
+      }
     } catch (error) {
       console.error('Restock error:', error);
       toast.error('Failed to restock product');

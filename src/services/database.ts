@@ -791,6 +791,176 @@ export const productService = {
     }
   },
 
+  async restock(restockData: {
+    productId: string;
+    bottlesToAdd: number;
+    costPerBottle: number;
+    totalCost: number;
+    supplier?: string;
+    invoiceNumber?: string;
+    notes?: string;
+    restockDate: string;
+  }): Promise<boolean> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY environment variables.');
+    }
+
+    try {
+      console.log('🔄 Starting restock operation for product:', restockData.productId);
+
+      // First, get the current product data
+      const { data: currentProduct, error: fetchError } = await supabase
+        .from('products')
+        .select('id, name, sealed_bottles, bottle_capacity_ml, cost')
+        .eq('id', restockData.productId)
+        .single();
+
+      if (fetchError) {
+        console.error('❌ Error fetching product for restock:', fetchError);
+        throw fetchError;
+      }
+
+      if (!currentProduct) {
+        throw new Error('Product not found');
+      }
+
+      const currentBottles = currentProduct.sealed_bottles || 0;
+      const newBottleCount = currentBottles + restockData.bottlesToAdd;
+
+      // Update the product's sealed bottles count and cost if provided
+      const updateData: any = {
+        sealed_bottles: newBottleCount,
+        updated_at: new Date().toISOString(),
+      };
+
+      // Update cost if provided and different from current
+      if (restockData.costPerBottle > 0 && restockData.costPerBottle !== currentProduct.cost) {
+        updateData.cost = restockData.costPerBottle;
+      }
+
+      console.log('🔄 Updating product with data:', {
+        productId: restockData.productId,
+        updateData,
+        currentBottles,
+        newBottleCount
+      });
+
+      const { error: updateError } = await supabase
+        .from('products')
+        .update(updateData)
+        .eq('id', restockData.productId);
+
+      if (updateError) {
+        console.error('❌ Error updating product stock:', updateError);
+        throw updateError;
+      }
+
+      // Log the restock in stock history
+      const { error: historyError } = await supabase
+        .from('stock_history')
+        .insert({
+          product_id: restockData.productId,
+          movement_type: 'restock',
+          quantity_before: currentBottles,
+          quantity_change: restockData.bottlesToAdd,
+          quantity_after: newBottleCount,
+          reason: `Restock: ${restockData.bottlesToAdd} bottles added${restockData.supplier ? ` from ${restockData.supplier}` : ''}${restockData.invoiceNumber ? ` (Invoice: ${restockData.invoiceNumber})` : ''}`,
+          created_at: restockData.restockDate,
+        });
+
+      if (historyError) {
+        console.error('❌ Error logging stock history:', historyError);
+        // Don't throw here as the main operation succeeded
+      }
+
+      // Note: Detailed restock tracking is handled through stock_history table
+      // The stock_history entry above contains all necessary restock information
+
+      console.log('✅ Restock completed successfully');
+      console.log(`📦 Product: ${currentProduct.name}`);
+      console.log(`📈 Stock: ${currentBottles} → ${newBottleCount} bottles (+${restockData.bottlesToAdd})`);
+
+      // Clear cache to ensure fresh data
+      clearCache('products');
+
+      return true;
+
+    } catch (error) {
+      console.error('❌ Error during restock operation:', error);
+      handleError(error, 'restock product');
+      return false;
+    }
+  },
+
+  async getRestockHistory(productId?: string): Promise<Array<{
+    id: string;
+    productId: string;
+    productName: string;
+    bottlesAdded: number;
+    costPerBottle: number;
+    totalCost: number;
+    supplier?: string;
+    invoiceNumber?: string;
+    notes?: string;
+    restockDate: string;
+    createdAt: string;
+  }>> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY environment variables.');
+    }
+
+    try {
+      let query = supabase
+        .from('stock_history')
+        .select(`
+          id,
+          product_id,
+          quantity_change,
+          reason,
+          created_at,
+          products!inner(name)
+        `)
+        .eq('movement_type', 'restock')
+        .order('created_at', { ascending: false });
+
+      if (productId) {
+        query = query.eq('product_id', productId);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        console.error('❌ Error fetching restock history:', error);
+        throw error;
+      }
+
+      return data?.map(record => {
+        // Parse the reason field to extract restock details
+        const reason = record.reason || '';
+        const supplierMatch = reason.match(/from (.+?)(?:\s*\(|$)/);
+        const invoiceMatch = reason.match(/\(Invoice: (.+?)\)/);
+        
+        return {
+          id: record.id,
+          productId: record.product_id,
+          productName: (record.products as any)?.name || 'Unknown Product',
+          bottlesAdded: record.quantity_change,
+          costPerBottle: 0, // Not available in stock_history
+          totalCost: 0, // Not available in stock_history
+          supplier: supplierMatch ? supplierMatch[1] : undefined,
+          invoiceNumber: invoiceMatch ? invoiceMatch[1] : undefined,
+          notes: reason,
+          restockDate: record.created_at.split('T')[0],
+          createdAt: record.created_at,
+        };
+      }) || [];
+
+    } catch (error) {
+      handleError(error, 'fetch restock history');
+      return [];
+    }
+  },
+
   async getAllWithRealUsage(): Promise<(Product & {
     realUsage: {
       totalUsed: number;

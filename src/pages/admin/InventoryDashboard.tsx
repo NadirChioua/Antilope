@@ -20,9 +20,11 @@ import {
   ShoppingCart,
   Users,
   Calendar,
-  Clock
+  Clock,
+  Camera
 } from 'lucide-react';
 import { SimpleBottleConsumptionService } from '@/services/SimpleBottleConsumptionService';
+import { productService } from '@/services/database';
 import { useLanguage } from '@/contexts/LanguageContext';
 import toast from 'react-hot-toast';
 import { formatPrice } from '@/utils/currency';
@@ -154,12 +156,25 @@ const InventoryDashboard: React.FC = () => {
 
   const handleRestock = async (productId: string, bottles: number) => {
     try {
-      // Note: SimpleBottleConsumptionService doesn't have restockProduct method
-      // This would need to be implemented or use a different approach
-      toast.error('Restock functionality needs to be implemented');
-      toast.success('Product restocked successfully');
-      loadDashboardData();
-      setShowRestockModal(false);
+      const restockData = {
+        productId,
+        bottlesToAdd: bottles,
+        costPerBottle: 0, // Default cost, can be updated later
+        totalCost: 0,
+        supplier: '',
+        invoiceNumber: '',
+        notes: 'Quick restock from inventory dashboard',
+        restockDate: new Date().toISOString().split('T')[0]
+      };
+
+      const success = await productService.restock(restockData);
+      if (success) {
+        toast.success('Product restocked successfully');
+        loadDashboardData();
+        setShowRestockModal(false);
+      } else {
+        toast.error('Failed to restock product');
+      }
     } catch (error) {
       console.error('Error restocking product:', error);
       toast.error('Failed to restock product');
@@ -208,10 +223,36 @@ const InventoryDashboard: React.FC = () => {
       color: 'bg-orange-500 hover:bg-orange-600',
       action: async () => {
         try {
-          // Note: SimpleBottleConsumptionService doesn't have createInventorySnapshot method
-          // This would need to be implemented or use a different approach
-          toast.info('Inventory snapshot functionality needs to be implemented');
-          toast.success('Inventory snapshot created');
+          // Create a simple inventory snapshot by exporting current stock data
+          const currentDate = new Date().toISOString().split('T')[0];
+          const snapshotData = products.map(product => ({
+            name: product.name,
+            brand: product.brand,
+            category: product.category,
+            sealed_bottles: product.sealed_bottles,
+            open_bottle_remaining_ml: product.open_bottle_remaining_ml,
+            total_ml_available: product.total_ml_available,
+            stock_status: product.stock_status,
+            snapshot_date: currentDate
+          }));
+          
+          // Convert to CSV and download
+          const csvContent = [
+            'Product Name,Brand,Category,Sealed Bottles,Open Bottle ML,Total ML Available,Stock Status,Snapshot Date',
+            ...snapshotData.map(item => 
+              `"${item.name}","${item.brand}","${item.category}",${item.sealed_bottles},${item.open_bottle_remaining_ml},${item.total_ml_available},"${item.stock_status}","${item.snapshot_date}"`
+            )
+          ].join('\n');
+          
+          const blob = new Blob([csvContent], { type: 'text/csv' });
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `inventory-snapshot-${currentDate}.csv`;
+          a.click();
+          window.URL.revokeObjectURL(url);
+          
+          toast.success('Inventory snapshot created and downloaded');
         } catch (error) {
           toast.error('Failed to create snapshot');
         }
