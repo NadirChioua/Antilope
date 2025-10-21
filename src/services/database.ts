@@ -343,7 +343,7 @@ export const serviceService = {
     try {
       const { data, error } = await supabase
         .from('services')
-        .select('id, name, name_ar, name_fr, description, price, duration, category, commission_percent, is_active, required_products, assigned_staff, created_at, updated_at')
+        .select('id, name, name_ar, name_fr, description, price, duration, category, commission_percent, is_active, required_products, assigned_staff, icon_name, icon_library, created_at, updated_at')
         .eq('is_active', true)
         .order('created_at', { ascending: false });
 
@@ -391,6 +391,8 @@ export const serviceService = {
           is_active: serviceData.isActive,
           required_products: serviceData.requiredProducts || [],
           assigned_staff: serviceData.assignedStaff || [],
+          icon_name: (serviceData as any).iconName || 'scissors',
+          icon_library: (serviceData as any).iconLibrary || 'lucide',
         })
         .select()
         .single();
@@ -442,6 +444,8 @@ export const serviceService = {
           is_active: serviceData.isActive,
           required_products: serviceData.requiredProducts || [],
           assigned_staff: serviceData.assignedStaff || [],
+          icon_name: (serviceData as any).iconName,
+          icon_library: (serviceData as any).iconLibrary,
           updated_at: new Date().toISOString(),
         })
         .eq('id', id)
@@ -1341,6 +1345,10 @@ export const saleService = {
     clientId: string;
     services: Array<{
       serviceId: string;
+      originalPrice: number;
+      adjustedPrice: number;
+      priceAdjustmentReason?: string;
+      quantity: number;
       products: Array<{
         productId: string;
         quantity: number;
@@ -1349,6 +1357,7 @@ export const saleService = {
     }>;
     staffId: string;
     paymentMethod: 'cash' | 'card' | 'transfer';
+    totalAmount: number;
     notes?: string;
   }): Promise<{ sale: Sale; receipt: any; commission: number } | null> {
     if (!isSupabaseConfigured()) {
@@ -1358,12 +1367,12 @@ export const saleService = {
     try {
       console.log('🛒 Creating complete sale with data:', saleData);
 
-      // Calculate total amount and validate stock
-      let totalAmount = 0;
+      // Use provided total amount and validate stock
+      const totalAmount = saleData.totalAmount;
       const serviceDetails = [];
       const allProducts = [];
 
-      // Fetch service details and calculate total
+      // Fetch service details and validate stock
       for (const serviceItem of saleData.services) {
         const { data: service, error: serviceError } = await supabase
           .from('services')
@@ -1376,7 +1385,6 @@ export const saleService = {
         }
 
         serviceDetails.push(service);
-        totalAmount += service.price;
 
         // Validate stock for each product
         for (const product of serviceItem.products) {
@@ -1442,62 +1450,27 @@ export const saleService = {
 
       console.log('✅ Main sale record created:', saleResult);
 
-      // Create sale items for each service
-      // Note: We need to handle the NOT NULL constraint on product_id
-      // For services, we'll create entries without product_id by using the service's associated products
-      for (const service of serviceDetails) {
-        // Get the first product associated with this service, or create a service-only entry
-        const serviceProducts = allProducts.filter(p => p.serviceId === service.id);
-        
-        if (serviceProducts.length > 0) {
-          // If service has associated products, create entries for each
-          for (const product of serviceProducts) {
-            const { error: saleItemError } = await supabase
-              .from('sale_items')
-              .insert({
-                sale_id: saleResult.id,
-                product_id: product.productId,
-                service_id: service.id,
-                quantity: product.quantity,
-                unit_price: service.price / serviceProducts.length, // Distribute service price
-                total_price: service.price / serviceProducts.length,
-                item_type: 'service',
-              });
+      // Create service items for each service instance
+      for (const serviceItem of saleData.services) {
+        const service = serviceDetails.find(s => s.id === serviceItem.serviceId);
+        if (!service) continue;
 
-            if (saleItemError) {
-              console.error('❌ Error creating service sale item:', saleItemError);
-              throw saleItemError;
-            }
-          }
-        } else {
-          // For services without products, we need to find a way to handle this
-          // Let's try to find any product to use as a placeholder
-          const { data: anyProduct, error: productError } = await supabase
-            .from('products')
-            .select('id')
-            .limit(1)
-            .single();
-
-          if (productError || !anyProduct) {
-            console.error('❌ No products available for service entry');
-            throw new Error('Cannot create service entry: no products available and product_id is required');
-          }
-
-          const { error: saleItemError } = await supabase
-            .from('sale_items')
+        // Create service items for each quantity
+        for (let i = 0; i < serviceItem.quantity; i++) {
+          const { error: serviceItemError } = await supabase
+            .from('service_items')
             .insert({
               sale_id: saleResult.id,
-              product_id: anyProduct.id, // Use placeholder product
-              service_id: service.id,
-              quantity: 0, // Zero quantity indicates this is a service-only entry
-              unit_price: service.price,
-              total_price: service.price,
-              item_type: 'service',
+              service_id: serviceItem.serviceId,
+              original_price: serviceItem.originalPrice,
+              adjusted_price: serviceItem.adjustedPrice,
+              price_adjustment_reason: serviceItem.priceAdjustmentReason,
+              quantity_sold: 1, // Each service item represents one instance
             });
 
-          if (saleItemError) {
-            console.error('❌ Error creating service sale item:', saleItemError);
-            throw saleItemError;
+          if (serviceItemError) {
+            console.error('❌ Error creating service item:', serviceItemError);
+            throw serviceItemError;
           }
         }
       }
@@ -1555,23 +1528,27 @@ export const saleService = {
           .eq('id', saleData.clientId);
       }
 
-      // Calculate and create commissions
+      // Calculate and create commissions based on service items
       let totalCommission = 0;
-      for (const service of serviceDetails) {
-        if (service.commission_percent > 0) {
-          const commissionAmount = (service.price * service.commission_percent) / 100;
-          totalCommission += commissionAmount;
+      for (const serviceItem of saleData.services) {
+        const service = serviceDetails.find(s => s.id === serviceItem.serviceId);
+        if (service && service.commission_percent > 0) {
+          // Calculate commission for each service instance
+          for (let i = 0; i < serviceItem.quantity; i++) {
+            const commissionAmount = (serviceItem.adjustedPrice * service.commission_percent) / 100;
+            totalCommission += commissionAmount;
 
-          await supabase
-            .from('commissions')
-            .insert({
-              staff_id: saleData.staffId,
-              sale_id: saleResult.id,
-              service_id: service.id,
-              commission_amount: commissionAmount,
-              commission_percentage: service.commission_percent,
-              status: 'pending',
-            });
+            await supabase
+              .from('commissions')
+              .insert({
+                staff_id: saleData.staffId,
+                sale_id: saleResult.id,
+                service_id: serviceItem.serviceId,
+                commission_amount: commissionAmount,
+                commission_percentage: service.commission_percent,
+                status: 'pending',
+              });
+          }
         }
       }
 
@@ -1602,15 +1579,31 @@ export const saleService = {
         createdAt: saleResult.created_at,
       };
 
-      // Generate receipt
+      // Get service items with adjusted prices for receipt
+      const { data: serviceItems } = await supabase
+        .from('service_items')
+        .select(`
+          service_id,
+          original_price,
+          adjusted_price,
+          price_adjustment_reason,
+          quantity_sold,
+          services!inner(name)
+        `)
+        .eq('sale_id', saleResult.id);
+
+      // Generate receipt with adjusted prices
       const receipt = {
         saleId: saleResult.id,
         clientName: clientData?.name || 'Unknown Client',
         clientPhone: clientData?.phone || '',
-        services: serviceDetails.map(s => ({
-          name: s.name,
-          price: s.price
-        })),
+        services: serviceItems?.map(item => ({
+          name: item.services.name,
+          originalPrice: item.original_price,
+          adjustedPrice: item.adjusted_price,
+          priceAdjustmentReason: item.price_adjustment_reason,
+          quantity: item.quantity_sold
+        })) || [],
         products: stockUpdates,
         totalAmount,
         paymentMethod: saleData.paymentMethod,

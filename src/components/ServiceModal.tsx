@@ -18,6 +18,8 @@ import { Service, Product, User, ServiceProduct } from '@/types';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { productService, staffService } from '@/services/database';
 import { formatPrice } from '@/utils/currency';
+import { getIconByName, getDefaultIconForService } from '@/utils/iconMapping';
+import IconSelector from '@/components/IconSelector';
 import toast from 'react-hot-toast';
 
 interface ServiceModalProps {
@@ -56,24 +58,29 @@ const ServiceModal: React.FC<ServiceModalProps> = ({
     isActive: true,
     requiredProducts: [] as ServiceProduct[],
     assignedStaff: [] as string[],
+    iconName: 'scissors',
+    iconLibrary: 'lucide',
   });
+
+  // Icon selector state
+  const [showIconSelector, setShowIconSelector] = useState(false);
 
   // Validation state
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   // Service categories
   const categories = [
-    'haircut',
-    'coloring',
-    'styling',
-    'treatment',
-    'manicure',
-    'pedicure',
-    'facial',
-    'massage',
-    'waxing',
-    'eyebrows',
-    'other',
+    'Coupe',
+    'Coloration',
+    'Coiffage',
+    'Traitement',
+    'Manucure',
+    'Pédicure',
+    'Soin du Visage',
+    'Massage',
+    'Épilation',
+    'Sourcils',
+    'Autres',
   ];
 
   // Load products and staff when modal opens
@@ -125,6 +132,8 @@ const ServiceModal: React.FC<ServiceModalProps> = ({
         isActive: service.isActive,
         requiredProducts: service.requiredProducts || [],
         assignedStaff: service.assignedStaff || [],
+        iconName: (service as any).iconName || getDefaultIconForService(service.name),
+        iconLibrary: (service as any).iconLibrary || 'lucide',
       });
     } else {
       setFormData({
@@ -311,6 +320,37 @@ const ServiceModal: React.FC<ServiceModalProps> = ({
                       {errors.category}
                     </p>
                   )}
+                </div>
+
+                {/* Icon Selection */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <Scissors className="w-4 h-4 inline mr-2" />
+                    Service Icon
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowIconSelector(true)}
+                      className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      {(() => {
+                        const IconComponent = getIconByName(formData.iconName);
+                        return IconComponent ? <IconComponent className="w-5 h-5" /> : <Scissors className="w-5 h-5" />;
+                      })()}
+                      <span className="text-sm font-medium capitalize">{formData.iconName}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const defaultIcon = getDefaultIconForService(formData.name);
+                        setFormData(prev => ({ ...prev, iconName: defaultIcon }));
+                      }}
+                      className="text-sm text-primary-600 hover:text-primary-700 transition-colors"
+                    >
+                      Auto-suggest
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -599,6 +639,15 @@ const ServiceModal: React.FC<ServiceModalProps> = ({
           </form>
         </motion.div>
       </div>
+
+      {/* Icon Selector Modal */}
+      <IconSelector
+        isOpen={showIconSelector}
+        onClose={() => setShowIconSelector(false)}
+        onSelect={(iconName) => setFormData(prev => ({ ...prev, iconName }))}
+        currentIcon={formData.iconName}
+        title="Select Service Icon"
+      />
     </AnimatePresence>
   );
 };

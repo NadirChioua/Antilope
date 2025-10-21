@@ -19,6 +19,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { dashboardService } from '@/services/database';
 import { supabaseAdmin, executeAdminQuery } from '@/lib/supabaseAdmin';
 import { formatPrice } from '@/utils/currency';
+import { getIconByName } from '@/utils/iconMapping';
 import CommissionDashboard from '@/components/admin/CommissionDashboard';
 
 const Dashboard: React.FC = () => {
@@ -275,7 +276,10 @@ const Dashboard: React.FC = () => {
               <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 bg-primary-100 rounded-full flex items-center justify-center">
-                    <TrendingUp className="w-4 h-4 text-primary-600" />
+                    {(() => {
+                      const IconComponent = getIconByName((sale as any).iconName || 'scissors');
+                      return IconComponent ? <IconComponent className="w-4 h-4 text-primary-600" /> : <TrendingUp className="w-4 h-4 text-primary-600" />;
+                    })()}
                   </div>
                   <div>
                     <p className="font-medium text-gray-800">{sale.service}</p>

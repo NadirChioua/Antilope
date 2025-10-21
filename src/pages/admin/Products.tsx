@@ -39,13 +39,13 @@ const Products = () => {
   const [historyProduct, setHistoryProduct] = useState<Product | null>(null);
 
   const categories = [
-    'Hair Care',
-    'Skin Care',
-    'Nail Care',
-    'Styling Products',
-    'Tools & Equipment',
-    'Cleaning Supplies',
-    'Other'
+    'Soins des Cheveux',
+    'Soins de la Peau',
+    'Soins des Ongles',
+    'Produits de Coiffage',
+    'Outils et Équipements',
+    'Produits de Nettoyage',
+    'Autres'
   ];
 
   useEffect(() => {
