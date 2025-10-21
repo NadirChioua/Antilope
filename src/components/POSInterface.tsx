@@ -25,6 +25,8 @@ import Logo from '@/components/Logo';
 import { clientService, serviceService, productService, saleService } from '@/services/database';
 import { SimpleBottleConsumptionService } from '@/services/SimpleBottleConsumptionService';
 import { useAuth } from '@/contexts/AuthContext';
+import { getIconByName } from '@/utils/iconMapping';
+import { useLanguage } from '@/contexts/LanguageContext';
 import toast from 'react-hot-toast';
 import { formatPrice } from '@/utils/currency';
 
@@ -41,6 +43,10 @@ interface ProductUsage {
 interface SelectedService {
   service: Service;
   products: ProductUsage[];
+  originalPrice: number;
+  adjustedPrice: number;
+  priceAdjustmentReason?: string;
+  quantity: number;
 }
 
 interface POSInterfaceProps {
@@ -49,6 +55,7 @@ interface POSInterfaceProps {
 
 const POSInterface: React.FC<POSInterfaceProps> = ({ onSaleComplete }) => {
   const { user } = useAuth();
+  const { t } = useLanguage();
   const [currentStep, setCurrentStep] = useState<'client' | 'services' | 'products' | 'payment' | 'receipt'>('client');
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [selectedServices, setSelectedServices] = useState<SelectedService[]>([]);
@@ -63,6 +70,8 @@ const POSInterface: React.FC<POSInterfaceProps> = ({ onSaleComplete }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [saleReceipt, setSaleReceipt] = useState<any>(null);
   const [isProcessingSale, setIsProcessingSale] = useState(false);
+  const [showPriceModal, setShowPriceModal] = useState(false);
+  const [editingService, setEditingService] = useState<SelectedService | null>(null);
 
   // Function to refresh product data
   const refreshProducts = async () => {
@@ -111,13 +120,20 @@ const POSInterface: React.FC<POSInterfaceProps> = ({ onSaleComplete }) => {
   );
 
   const calculateTotal = () => {
-    return selectedServices.reduce((total, selectedService) => total + selectedService.service.price, 0);
+    return selectedServices.reduce((total, selectedService) => 
+      total + (selectedService.adjustedPrice * selectedService.quantity), 0);
   };
 
   const validateStock = () => {
     const stockErrors: string[] = [];
     
+    // Only validate stock for products that are actually being used
     for (const usage of allProductUsages) {
+      // Skip validation if no quantity is specified (services without products)
+      if (usage.actualQuantity <= 0) {
+        continue;
+      }
+      
       const openBottleMl = usage.product.open_bottle_remaining_ml || 0;
       const sealedBottles = usage.product.sealed_bottles || 0;
       const bottleSize = usage.product.bottle_capacity_ml || 1000;
@@ -141,64 +157,133 @@ const POSInterface: React.FC<POSInterfaceProps> = ({ onSaleComplete }) => {
   };
 
   const handleServiceSelect = async (service: Service) => {
-    // Check if service is already selected
-    const isAlreadySelected = selectedServices.some(s => s.service.id === service.id);
+    // Allow multiple instances of the same service
     console.log('🔍 Service selection debug:', {
       serviceName: service.name,
       serviceId: service.id,
-      isAlreadySelected,
       currentSelectedServices: selectedServices.map(s => ({ id: s.service.id, name: s.service.name }))
     });
     
-    if (isAlreadySelected) {
-      toast.error('Service already selected');
-      return;
-    }
-    
-    // Load required products for this service
-    const requiredProducts = service.requiredProducts || [];
+    // Load required products for this service from the database (optional)
     const serviceProducts: ProductUsage[] = [];
     
-    for (const reqProduct of requiredProducts) {
-      const product = products.find(p => p.id === reqProduct.productId);
-      if (product) {
-        const openBottleMl = product.open_bottle_remaining_ml || 0;
-        const sealedBottles = product.sealed_bottles || 0;
-        const bottleSize = product.bottle_capacity_ml || 1000;
-        const totalAvailableMl = (sealedBottles * bottleSize) + openBottleMl;
-        const stockStatus = totalAvailableMl <= 0 ? 'empty' : 
-                           totalAvailableMl <= 100 ? 'low' : 'ok'; // Consider low stock when less than 100ml available
-        
-        serviceProducts.push({
-          productId: product.id,
-          product,
-          suggestedQuantity: reqProduct.defaultQuantity || 1,
-          actualQuantity: reqProduct.defaultQuantity || 1,
-          unit: reqProduct.unit || product.unit,
-          stockStatus,
-          serviceId: service.id
-        });
+    try {
+      // Get service product requirements from the database
+      const requirements = await SimpleBottleConsumptionService.getServiceProductRequirements(service.id);
+      
+      // Only add products if they exist and are required
+      if (requirements && requirements.length > 0) {
+        for (const requirement of requirements) {
+          const product = products.find(p => p.id === requirement.productId);
+          if (product) {
+            const openBottleMl = product.open_bottle_remaining_ml || 0;
+            const sealedBottles = product.sealed_bottles || 0;
+            const bottleSize = product.bottle_capacity_ml || 1000;
+            const totalAvailableMl = (sealedBottles * bottleSize) + openBottleMl;
+            const stockStatus = totalAvailableMl <= 0 ? 'empty' : 
+                               totalAvailableMl <= 100 ? 'low' : 'ok';
+            
+            serviceProducts.push({
+              productId: product.id,
+              product,
+              suggestedQuantity: requirement.requiredMl,
+              actualQuantity: requirement.requiredMl,
+              unit: 'ml',
+              stockStatus,
+              serviceId: service.id
+            });
+          }
+        }
       }
+    } catch (error) {
+      console.log('No product requirements found for service:', service.name);
+      // This is OK - services can be sold without products
     }
     
-    // Add service to selected services
+    // Add service to selected services with pricing
     const newSelectedService: SelectedService = {
       service,
-      products: serviceProducts
+      products: serviceProducts, // Can be empty array
+      originalPrice: service.price,
+      adjustedPrice: service.price,
+      quantity: 1
     };
     
     setSelectedServices(prev => [...prev, newSelectedService]);
     
-    // Update all product usages
+    // Update all product usages (can be empty)
     setAllProductUsages(prev => [...prev, ...serviceProducts]);
     
     toast.success(`${service.name} added to sale`);
   };
 
-  const handleRemoveService = (serviceId: string) => {
-    setSelectedServices(prev => prev.filter(s => s.service.id !== serviceId));
-    setAllProductUsages(prev => prev.filter(p => p.serviceId !== serviceId));
+  const handleRemoveService = (serviceId: string, serviceIndex?: number) => {
+    if (serviceIndex !== undefined) {
+      // Remove specific instance of repeated service
+      setSelectedServices(prev => prev.filter((s, index) => 
+        !(s.service.id === serviceId && index === serviceIndex)
+      ));
+      setAllProductUsages(prev => prev.filter((p, index) => 
+        !(p.serviceId === serviceId && index === serviceIndex)
+      ));
+    } else {
+      // Remove all instances of the service
+      setSelectedServices(prev => prev.filter(s => s.service.id !== serviceId));
+      setAllProductUsages(prev => prev.filter(p => p.serviceId !== serviceId));
+    }
     toast.success('Service removed from sale');
+  };
+
+  const handlePriceAdjustment = (service: SelectedService) => {
+    setEditingService(service);
+    setShowPriceModal(true);
+  };
+
+  const handleSavePriceAdjustment = (newPrice: number, reason?: string) => {
+    if (!editingService) return;
+
+    setSelectedServices(prev => prev.map(s => 
+      s.service.id === editingService.service.id 
+        ? { ...s, adjustedPrice: newPrice, priceAdjustmentReason: reason }
+        : s
+    ));
+
+    setShowPriceModal(false);
+    setEditingService(null);
+    toast.success('Price adjusted successfully');
+  };
+
+  const handleQuantityChange = (serviceId: string, newQuantity: number, productId?: string) => {
+    if (productId) {
+      // Handle product quantity change
+      setSelectedServices(prev => prev.map(selectedService => {
+        if (selectedService.service.id === serviceId) {
+          return {
+            ...selectedService,
+            products: selectedService.products.map(product => 
+              product.productId === productId 
+                ? { ...product, actualQuantity: Math.max(0, newQuantity) }
+                : product
+            )
+          };
+        }
+        return selectedService;
+      }));
+
+      // Update in all product usages
+      setAllProductUsages(prev => prev.map(usage => 
+        usage.productId === productId && usage.serviceId === serviceId
+          ? { ...usage, actualQuantity: Math.max(0, newQuantity) }
+          : usage
+      ));
+    } else {
+      // Handle service quantity change
+      setSelectedServices(prev => prev.map(s => 
+        s.service.id === serviceId 
+          ? { ...s, quantity: Math.max(1, newQuantity) }
+          : s
+      ));
+    }
   };
 
   const handleContinueToProducts = () => {
@@ -209,29 +294,6 @@ const POSInterface: React.FC<POSInterfaceProps> = ({ onSaleComplete }) => {
     setCurrentStep('products');
   };
 
-  const handleQuantityChange = (productId: string, serviceId: string, newQuantity: number) => {
-    // Update in selected services
-    setSelectedServices(prev => prev.map(selectedService => {
-      if (selectedService.service.id === serviceId) {
-        return {
-          ...selectedService,
-          products: selectedService.products.map(product => 
-            product.productId === productId 
-              ? { ...product, actualQuantity: Math.max(0, newQuantity) }
-              : product
-          )
-        };
-      }
-      return selectedService;
-    }));
-
-    // Update in all product usages
-    setAllProductUsages(prev => prev.map(usage => 
-      usage.productId === productId && usage.serviceId === serviceId
-        ? { ...usage, actualQuantity: Math.max(0, newQuantity) }
-        : usage
-    ));
-  };
 
   const addExtraProduct = (serviceId: string, product: Product) => {
     const openBottleMl = product.open_bottle_remaining_ml || 0;
@@ -284,13 +346,14 @@ const POSInterface: React.FC<POSInterfaceProps> = ({ onSaleComplete }) => {
   };
 
   const calculateTotalAmount = () => {
-    return selectedServices.reduce((total, selectedService) => total + selectedService.service.price, 0);
+    return selectedServices.reduce((total, selectedService) => 
+      total + (selectedService.adjustedPrice * selectedService.quantity), 0);
   };
 
   const calculateTotalCommission = () => {
     return selectedServices.reduce((total, selectedService) => {
       const commissionPercent = selectedService.service.commissionPercent || 0;
-      return total + (selectedService.service.price * (commissionPercent / 100));
+      return total + (selectedService.adjustedPrice * selectedService.quantity * (commissionPercent / 100));
     }, 0);
   };
 
@@ -316,10 +379,13 @@ const POSInterface: React.FC<POSInterfaceProps> = ({ onSaleComplete }) => {
       return;
     }
 
-    // Validate that all services have at least one product
-    const servicesWithoutProducts = selectedServices.filter(ss => ss.products.length === 0);
-    if (servicesWithoutProducts.length > 0) {
-      toast.error(`Services missing products: ${servicesWithoutProducts.map(s => s.service.name).join(', ')}`);
+    // Validate that services with products have valid quantities
+    const servicesWithProducts = selectedServices.filter(ss => ss.products.length > 0);
+    const invalidServices = servicesWithProducts.filter(ss => 
+      ss.products.some(p => p.actualQuantity <= 0)
+    );
+    if (invalidServices.length > 0) {
+      toast.error(`Services with invalid product quantities: ${invalidServices.map(s => s.service.name).join(', ')}`);
       return;
     }
 
@@ -330,7 +396,7 @@ const POSInterface: React.FC<POSInterfaceProps> = ({ onSaleComplete }) => {
       return;
     }
 
-    // Check for zero quantities
+    // Check for zero quantities only for products that are actually being used
     const zeroQuantityProducts = allProductUsages.filter(usage => usage.actualQuantity <= 0);
     if (zeroQuantityProducts.length > 0) {
       toast.error(`Products with zero quantity: ${zeroQuantityProducts.map(p => p.product.name).join(', ')}`);
@@ -352,6 +418,10 @@ const POSInterface: React.FC<POSInterfaceProps> = ({ onSaleComplete }) => {
         clientId: selectedClient.id,
         services: selectedServices.map(selectedService => ({
           serviceId: selectedService.service.id,
+          originalPrice: selectedService.originalPrice,
+          adjustedPrice: selectedService.adjustedPrice,
+          priceAdjustmentReason: selectedService.priceAdjustmentReason,
+          quantity: selectedService.quantity,
           products: selectedService.products.map(product => ({
             productId: product.productId,
             quantity: product.actualQuantity,
@@ -360,6 +430,7 @@ const POSInterface: React.FC<POSInterfaceProps> = ({ onSaleComplete }) => {
         })),
         staffId: user.id,
         paymentMethod,
+        totalAmount: totalAmount,
         notes: `Sale with ${selectedServices.length} service(s): ${selectedServices.map(s => s.service.name).join(', ')}`,
       };
 
@@ -380,7 +451,7 @@ const POSInterface: React.FC<POSInterfaceProps> = ({ onSaleComplete }) => {
           throw new Error('Invalid sale result - missing sale ID');
         }
 
-        // Process bottle consumption for each service
+        // Process bottle consumption for each service (only if products exist)
         let totalMlConsumed = 0;
         let totalBottlesOpened = 0;
         const consumptionErrors: string[] = [];
@@ -388,6 +459,12 @@ const POSInterface: React.FC<POSInterfaceProps> = ({ onSaleComplete }) => {
         for (const selectedService of selectedServices) {
           try {
             console.log(`🍾 Processing bottle consumption for service: ${selectedService.service.name}`);
+            
+            // Skip consumption if no products are required for this service
+            if (selectedService.products.length === 0) {
+              console.log(`✅ Service ${selectedService.service.name} has no products - skipping consumption`);
+              continue;
+            }
             
             // Check service availability first
             const availability = await SimpleBottleConsumptionService.checkServiceAvailability(selectedService.service.id);
@@ -399,6 +476,12 @@ const POSInterface: React.FC<POSInterfaceProps> = ({ onSaleComplete }) => {
 
             // Process each product with the actual quantities selected by the user
             for (const productUsage of selectedService.products) {
+              // Skip products with zero quantity
+              if (productUsage.actualQuantity <= 0) {
+                console.log(`⏭️ Skipping product ${productUsage.product.name} - zero quantity`);
+                continue;
+              }
+              
               const consumptionResult = await SimpleBottleConsumptionService.consumeProduct({
                 productId: productUsage.productId,
                 requiredMl: productUsage.actualQuantity, // Use the actual quantity selected by the user
@@ -544,20 +627,20 @@ const POSInterface: React.FC<POSInterfaceProps> = ({ onSaleComplete }) => {
       >
         <div className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-3 mb-4">
           <Logo size="xl" variant="light" />
-          <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-gray-800 text-elegant">New Sale</h1>
+          <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-gray-800 text-elegant">{t('pos.title')}</h1>
         </div>
-        <p className="text-gray-600 text-base sm:text-lg px-4">Create a beautiful experience for your client</p>
+        <p className="text-gray-600 text-base sm:text-lg px-4">{t('pos.selectClient')}</p>
       </motion.div>
 
       {/* Progress Steps */}
       <div className="flex justify-center mb-8 px-4">
         <div className="flex items-center space-x-2 sm:space-x-4 overflow-x-auto pb-2">
           {[
-            { key: 'client', label: 'Client', icon: User },
-            { key: 'services', label: 'Services', icon: Scissors },
-            { key: 'products', label: 'Products', icon: Package },
-            { key: 'payment', label: 'Payment', icon: CreditCard },
-            { key: 'receipt', label: 'Receipt', icon: Receipt }
+            { key: 'client', label: t('pos.selectClient'), icon: User },
+            { key: 'services', label: t('pos.selectServices'), icon: Scissors },
+            { key: 'products', label: t('pos.selectProducts'), icon: Package },
+            { key: 'payment', label: t('pos.paymentMethod'), icon: CreditCard },
+            { key: 'receipt', label: t('pos.receipt'), icon: Receipt }
           ].map((step, index) => {
             const steps = ['client', 'services', 'products', 'payment', 'receipt'];
             const currentIndex = steps.indexOf(currentStep);
@@ -620,8 +703,8 @@ const POSInterface: React.FC<POSInterfaceProps> = ({ onSaleComplete }) => {
                     <div className="w-20 h-20 gradient-primary rounded-full flex items-center justify-center mx-auto mb-4">
                       <User className="w-10 h-10 text-white" />
                     </div>
-                    <h2 className="text-2xl font-bold text-gray-800 mb-2">Select Client</h2>
-                    <p className="text-gray-600">Choose an existing client or add a new one</p>
+                    <h2 className="text-2xl font-bold text-gray-800 mb-2">{t('pos.selectClient')}</h2>
+                    <p className="text-gray-600">{t('pos.selectClient')}</p>
                   </div>
 
                   {/* Search Bar */}
@@ -629,7 +712,7 @@ const POSInterface: React.FC<POSInterfaceProps> = ({ onSaleComplete }) => {
                     <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
                     <input
                       type="text"
-                      placeholder="Search clients by name or phone..."
+                      placeholder={t('pos.clientSearch')}
                       value={clientSearch}
                       onChange={(e) => setClientSearch(e.target.value)}
                       className="w-full pl-12 pr-4 py-4 bg-white border border-gray-200 rounded-xl text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-lg shadow-soft"
@@ -672,7 +755,7 @@ const POSInterface: React.FC<POSInterfaceProps> = ({ onSaleComplete }) => {
                     className="w-full py-4 bg-primary-500 hover:bg-primary-600 text-white font-semibold rounded-xl transition-all duration-200 flex items-center justify-center gap-2 shadow-soft hover:shadow-elegant"
                   >
                     <Plus className="w-5 h-5" />
-                    Add New Client
+                    {t('pos.addNewClient')}
                   </button>
                 </motion.div>
               )}
@@ -711,18 +794,61 @@ const POSInterface: React.FC<POSInterfaceProps> = ({ onSaleComplete }) => {
                     <div className="mb-6">
                       <h3 className="text-lg font-semibold text-gray-800 mb-3">Selected Services:</h3>
                       <div className="space-y-2">
-                        {selectedServices.map((selectedService) => (
-                          <div key={selectedService.service.id} className="flex items-center justify-between p-3 bg-primary-50 rounded-lg border border-primary-200">
-                            <div>
-                              <p className="font-medium text-gray-800">{selectedService.service.name}</p>
-                              <p className="text-sm text-gray-600">{formatPrice(selectedService.service.price)}</p>
+                        {selectedServices.map((selectedService, index) => (
+                          <div key={`${selectedService.service.id}-${index}`} className="p-3 bg-primary-50 rounded-lg border border-primary-200">
+                            <div className="flex items-center justify-between mb-2">
+                              <div>
+                                <p className="font-medium text-gray-800">
+                                  {selectedService.service.name}
+                                  {selectedServices.filter(s => s.service.id === selectedService.service.id).length > 1 && (
+                                    <span className="ml-2 text-xs bg-primary-100 text-primary-700 px-2 py-1 rounded-full">
+                                      #{selectedServices.filter(s => s.service.id === selectedService.service.id).indexOf(selectedService) + 1}
+                                    </span>
+                                  )}
+                                </p>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm text-gray-600">
+                                    Original: {formatPrice(selectedService.originalPrice)}
+                                  </span>
+                                  {selectedService.adjustedPrice !== selectedService.originalPrice && (
+                                    <span className="text-sm text-green-600 font-medium">
+                                      Adjusted: {formatPrice(selectedService.adjustedPrice)}
+                                    </span>
+                                  )}
+                                </div>
+                                {selectedService.priceAdjustmentReason && (
+                                  <p className="text-xs text-gray-500 mt-1">
+                                    Reason: {selectedService.priceAdjustmentReason}
+                                  </p>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => handlePriceAdjustment(selectedService)}
+                                  className="text-blue-500 hover:text-blue-700 transition-colors p-1"
+                                  title="Adjust Price"
+                                >
+                                  <Edit3 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleRemoveService(selectedService.service.id, index)}
+                                  className="text-red-500 hover:text-red-700 transition-colors p-1"
+                                  title="Remove Service"
+                                >
+                                  <Minus className="w-4 h-4" />
+                                </button>
+                              </div>
                             </div>
-                            <button
-                              onClick={() => handleRemoveService(selectedService.service.id)}
-                              className="text-red-500 hover:text-red-700 transition-colors"
-                            >
-                              <Minus className="w-4 h-4" />
-                            </button>
+                            <div className="flex items-center gap-2">
+                              <label className="text-sm text-gray-600">Quantity:</label>
+                              <input
+                                type="number"
+                                min="1"
+                                value={selectedService.quantity}
+                                onChange={(e) => handleQuantityChange(selectedService.service.id, parseInt(e.target.value) || 1)}
+                                className="w-16 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-500"
+                              />
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -740,9 +866,15 @@ const POSInterface: React.FC<POSInterfaceProps> = ({ onSaleComplete }) => {
                         whileTap={{ scale: 0.98 }}
                       >
                         <div className="flex items-start justify-between mb-3">
-                          <h3 className="text-lg font-semibold text-gray-800 group-hover:text-primary-600 transition-colors">
-                            {service.name}
-                          </h3>
+                          <div className="flex items-center gap-3">
+                            {(() => {
+                              const IconComponent = getIconByName((service as any).iconName || 'scissors');
+                              return IconComponent ? <IconComponent className="w-6 h-6 text-primary-500" /> : <Scissors className="w-6 h-6 text-primary-500" />;
+                            })()}
+                            <h3 className="text-lg font-semibold text-gray-800 group-hover:text-primary-600 transition-colors">
+                              {service.name}
+                            </h3>
+                          </div>
                           <div className="text-right">
                             <p className="text-2xl font-bold text-primary-500">{formatPrice(service.price)}</p>
                             <div className="flex items-center gap-1 text-gray-500 text-sm">
@@ -754,7 +886,12 @@ const POSInterface: React.FC<POSInterfaceProps> = ({ onSaleComplete }) => {
                         <p className="text-gray-600 text-sm mb-3">{service.description}</p>
                         <div className="flex items-center gap-2 text-xs text-gray-500">
                           <Package className="w-4 h-4" />
-                          <span>{(service.requiredProducts || []).length} products required</span>
+                          <span>
+                            {(service.requiredProducts || []).length > 0 
+                              ? `${(service.requiredProducts || []).length} products required`
+                              : 'No products required'
+                            }
+                          </span>
                         </div>
                       </motion.button>
                     ))}
@@ -836,7 +973,7 @@ const POSInterface: React.FC<POSInterfaceProps> = ({ onSaleComplete }) => {
                                 <label className="text-sm font-medium text-gray-700">Actual Amount Used (ml):</label>
                                 <div className="flex items-center gap-2">
                                   <button
-                                    onClick={() => handleQuantityChange(usage.productId, selectedService.service.id, usage.actualQuantity - 1)}
+                                    onClick={() => handleQuantityChange(selectedService.service.id, usage.actualQuantity - 1, usage.productId)}
                                     className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600 transition-colors"
                                   >
                                     <Minus className="w-4 h-4" />
@@ -844,13 +981,13 @@ const POSInterface: React.FC<POSInterfaceProps> = ({ onSaleComplete }) => {
                                   <input
                                     type="number"
                                     value={usage.actualQuantity}
-                                    onChange={(e) => handleQuantityChange(usage.productId, selectedService.service.id, parseInt(e.target.value) || 0)}
+                                    onChange={(e) => handleQuantityChange(selectedService.service.id, parseInt(e.target.value) || 0, usage.productId)}
                                     className="w-20 px-3 py-2 text-center border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                                     min="0"
                                     max={(usage.product.sealed_bottles || 0) * (usage.product.bottle_capacity_ml || 0) + (usage.product.open_bottle_remaining_ml || 0)}
                                   />
                                   <button
-                                    onClick={() => handleQuantityChange(usage.productId, selectedService.service.id, usage.actualQuantity + 1)}
+                                    onClick={() => handleQuantityChange(selectedService.service.id, usage.actualQuantity + 1, usage.productId)}
                                     className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600 transition-colors"
                                   >
                                     <Plus className="w-4 h-4" />
@@ -951,9 +1088,15 @@ const POSInterface: React.FC<POSInterfaceProps> = ({ onSaleComplete }) => {
                       <div className="space-y-3">
                         {selectedServices.map((selectedService) => (
                           <div key={selectedService.service.id} className="flex items-center justify-between">
-                            <div>
-                              <p className="font-medium text-gray-800">{selectedService.service.name}</p>
-                              <p className="text-gray-600 text-sm">{selectedService.service.description}</p>
+                            <div className="flex items-center gap-3">
+                              {(() => {
+                                const IconComponent = getIconByName((selectedService.service as any).iconName || 'scissors');
+                                return IconComponent ? <IconComponent className="w-5 h-5 text-primary-500" /> : <Scissors className="w-5 h-5 text-primary-500" />;
+                              })()}
+                              <div>
+                                <p className="font-medium text-gray-800">{selectedService.service.name}</p>
+                                <p className="text-gray-600 text-sm">{selectedService.service.description}</p>
+                              </div>
                             </div>
                             <div className="text-right">
                               <p className="text-lg font-bold text-primary-500">{formatPrice(selectedService.service.price)}</p>
@@ -1248,10 +1391,40 @@ const POSInterface: React.FC<POSInterfaceProps> = ({ onSaleComplete }) => {
                         Services ({selectedServices.length})
                       </p>
                       <div className="space-y-2">
-                        {selectedServices.map((selectedService) => (
-                          <div key={selectedService.service.id} className="flex justify-between items-center">
-                            <p className="font-medium text-gray-800 text-sm">{selectedService.service.name}</p>
-                            <p className="text-primary-600 font-bold text-sm">{formatPrice(selectedService.service.price)}</p>
+                        {selectedServices.map((selectedService, index) => (
+                          <div key={`${selectedService.service.id}-${index}`} className="flex justify-between items-center">
+                            <div className="flex items-center gap-2">
+                              {(() => {
+                                const IconComponent = getIconByName((selectedService.service as any).iconName || 'scissors');
+                                return IconComponent ? <IconComponent className="w-4 h-4 text-primary-500" /> : <Scissors className="w-4 h-4 text-primary-500" />;
+                              })()}
+                              <div>
+                                <p className="font-medium text-gray-800 text-sm">
+                                  {selectedService.service.name}
+                                  {selectedServices.filter(s => s.service.id === selectedService.service.id).length > 1 && (
+                                    <span className="ml-1 text-xs text-gray-500">
+                                      (#{selectedServices.filter(s => s.service.id === selectedService.service.id).indexOf(selectedService) + 1})
+                                    </span>
+                                  )}
+                                </p>
+                                {selectedService.quantity > 1 && (
+                                  <p className="text-xs text-gray-500">Qty: {selectedService.quantity}</p>
+                                )}
+                                {selectedService.adjustedPrice !== selectedService.originalPrice && (
+                                  <p className="text-xs text-green-600">Price adjusted</p>
+                                )}
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-primary-600 font-bold text-sm">
+                                {formatPrice(selectedService.adjustedPrice * selectedService.quantity)}
+                              </p>
+                              {selectedService.adjustedPrice !== selectedService.originalPrice && (
+                                <p className="text-xs text-gray-500 line-through">
+                                  {formatPrice(selectedService.originalPrice * selectedService.quantity)}
+                                </p>
+                              )}
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -1321,6 +1494,73 @@ const POSInterface: React.FC<POSInterfaceProps> = ({ onSaleComplete }) => {
         onClose={() => setShowClientModal(false)}
         onSave={handleAddClient}
       />
+
+      {/* Price Adjustment Modal */}
+      {showPriceModal && editingService && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4">
+              Adjust Price for {editingService.service.name}
+            </h3>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Original Price
+                </label>
+                <p className="text-lg font-semibold text-gray-600">
+                  {formatPrice(editingService.originalPrice)}
+                </p>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  New Price
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  defaultValue={editingService.adjustedPrice}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  id="newPrice"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Reason (Optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g., VIP discount, seasonal promotion"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  id="adjustmentReason"
+                />
+              </div>
+            </div>
+            
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => setShowPriceModal(false)}
+                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const newPrice = parseFloat((document.getElementById('newPrice') as HTMLInputElement)?.value || '0');
+                  const reason = (document.getElementById('adjustmentReason') as HTMLInputElement)?.value || '';
+                  handleSavePriceAdjustment(newPrice, reason);
+                }}
+                className="flex-1 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+              >
+                Save Price
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

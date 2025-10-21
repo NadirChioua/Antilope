@@ -8,6 +8,7 @@ import { serviceService, staffService } from '@/services/database';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { toast } from 'react-hot-toast';
 import { formatPrice } from '@/utils/currency';
+import { getIconByName } from '@/utils/iconMapping';
 
 const Services: React.FC = () => {
   const { t } = useLanguage();
@@ -24,17 +25,17 @@ const Services: React.FC = () => {
 
   // Service categories
   const categories = [
-    'haircut',
-    'coloring',
-    'styling',
-    'treatment',
-    'manicure',
-    'pedicure',
-    'facial',
-    'massage',
-    'waxing',
-    'eyebrows',
-    'other',
+    'Coupe',
+    'Coloration',
+    'Coiffage',
+    'Traitement',
+    'Manucure',
+    'Pédicure',
+    'Soin du Visage',
+    'Massage',
+    'Épilation',
+    'Sourcils',
+    'Autres',
   ];
 
   const fetchServices = async () => {
@@ -226,11 +227,17 @@ const Services: React.FC = () => {
         {filteredServices.map((service) => (
           <div key={service.id} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow">
             <div className="flex justify-between items-start mb-4">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-1">
-                  {service.name}
-                </h3>
-                <p className="text-sm text-gray-500">{service.category}</p>
+              <div className="flex items-center gap-3">
+                {(() => {
+                  const IconComponent = getIconByName((service as any).iconName || 'scissors');
+                  return IconComponent ? <IconComponent className="w-6 h-6 text-primary-500" /> : <Scissors className="w-6 h-6 text-primary-500" />;
+                })()}
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-1">
+                    {service.name}
+                  </h3>
+                  <p className="text-sm text-gray-500">{service.category}</p>
+                </div>
               </div>
               <div className="flex gap-1">
                 <button
